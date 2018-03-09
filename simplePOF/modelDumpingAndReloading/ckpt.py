@@ -13,7 +13,7 @@ dec_v2 = v2.assign(v2-1)
 init_op = tf.global_variables_initializer()
 
 # Add ops to save and restore all the variables.
-saver = tf.train.Saver() #keep_checkpoint_every_n_hours=10)
+saver = tf.train.Saver(max_to_keep=1, keep_checkpoint_every_n_hours=2)
 
 #One can also on add ops to save and restore only `v2` using the name "v2"
 saver2 = tf.train.Saver({"v2": v2})
@@ -28,6 +28,8 @@ with tf.Session() as sess:
     # Save the variables to disk.
     save_path = saver.save(sess, "/tmp/model.ckpt")
     print("Model saved in path: %s" % save_path)
+
+with tf.train.MonitoredTrainingSession(, save_checkpoint_secs=1):
 
 
 # Now reload everything:

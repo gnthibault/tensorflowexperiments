@@ -1,0 +1,4 @@
+*.data*
+*.index
+*.meta
+checkpoint
