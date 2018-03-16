@@ -1,9 +1,14 @@
 # tensorflow stuff
 import tensorflow as tf
 
+# Math stuff
+import numpy as np
+
 # Image stuff
 import scipy.misc as scm
 
+# tracing/showing/verbose tools
+import matplotlib.pyplot as plt
 
 def _int64_feature(value):
     """Wrapper for inserting int64 features into Example proto."""
@@ -12,7 +17,7 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
 
 
-def _float_feature(value):
+def _float32_feature(value):
     """Wrapper for inserting float features into Example proto."""
     if not isinstance(value, list):
         value = [value]
@@ -42,8 +47,8 @@ nsamples = 10
 # Please take take of using a random sample order here
 for i in range(nsamples):
     # Usually one open individual files there
-    feature = scm.face()
-    label = scm.face()[:,:,1]>100
+    feature = scm.face().astype(np.float32)
+    label = (scm.face()[:,:,1]>100).astype(np.float32)
 
     # then convert to strings
     raw_feature = feature.tostring()
@@ -51,10 +56,8 @@ for i in range(nsamples):
 
     # tf.train.Example() call instantiates a new protocol buffer,
     # and fills in some of its fields
-
     # data should be converted to either tf.train.Int64List, tf.train.BytesList,
-    # or  tf.train.FloatList
-
+    # or  tf.train.FloatList (float32)
     colorspace = 'RGB'
     width = feature.shape[1]
     height = feature.shape[0]
@@ -63,14 +66,14 @@ for i in range(nsamples):
     comment = 'This is a comment'
 
     example = tf.train.Example(features=tf.train.Features(feature={
-        'image/encoded': _bytes_feature(raw_feature),
-        'image/label': _bytes_feature(raw_label),
-        'image/width': _int64_feature(width),
-        'image/height': _int64_feature(height),
-        'image/channels': _int64_feature(channels),
-        'image/colorspace': _bytes_feature(colorspace.encode()),
-        'image/info/quality': _float_feature(quality),
-        'image/info/comment': _bytes_feature(comment.encode())}))
+        'train/image': _bytes_feature(raw_feature),
+        'train/label': _bytes_feature(raw_label),
+        'train/width': _int64_feature(width),
+        'train/height': _int64_feature(height),
+        'train/channels': _int64_feature(channels),
+        'train/colorspace': _bytes_feature(colorspace.encode()),
+        'train/info/quality': _float32_feature(quality),
+        'train/info/comment': _bytes_feature(comment.encode())}))
         
     #Then, we serialize the protocol buffer to a string and write it to a tfr
     writer.write(example.SerializeToString())
@@ -78,5 +81,78 @@ for i in range(nsamples):
 writer.close()
 
 # Now read
-for sample in tf.python_io.tf_record_iterator(tfrecord_name):
-  print('type is {}'.format(type(sample)))
+#for sample in tf.python_io.tf_record_iterator(tfrecord_name):
+#  print('type is {}'.format(type(sample)))
+
+
+with tf.Session() as sess:
+    feature = {'train/image': tf.FixedLenFeature([], tf.string),
+               'train/label': tf.FixedLenFeature([], tf.string),
+               'train/width': tf.FixedLenFeature([], tf.int64),
+               'train/height': tf.FixedLenFeature([], tf.int64),
+               'train/channels': tf.FixedLenFeature([], tf.int64),
+               'train/colorspace': tf.FixedLenFeature([], tf.string),
+               'train/info/quality': tf.FixedLenFeature([], tf.float32),
+               'train/info/comment': tf.FixedLenFeature([], tf.string)}
+
+    # Create a list of filenames and pass it to a queue
+    filename_queue = tf.train.string_input_producer([tfrecord_name],
+                                                    num_epochs=1)
+    # Define a reader and read the next record
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(filename_queue)
+    # Decode the record read by the reader
+    features = tf.parse_single_example(serialized_example, features=feature)
+    # Convert the image data from string back to the numbers
+    image = tf.decode_raw(features['train/image'], tf.float32)
+    label = tf.decode_raw(features['train/label'], tf.float32)
+
+    # get info about images
+    width = tf.cast(features['train/width'], tf.int32)
+    height = tf.cast(features['train/height'], tf.int32)
+    channels = tf.cast(features['train/channels'], tf.int32)
+
+    # get some more info if needed
+    comment = tf.cast(features['train/image'], tf.string)
+    quality = tf.cast(features['train/image'], tf.float32)
+    #print('Comment was: {} and quality was {}'.format(comment, quality))
+
+    # Reshape image data into the original shape
+    # aShape must be defined otherwise, get
+    # ValueError: All shapes must be fully defined:
+    #image = tf.reshape(image, [height, width, channels])
+    image = tf.reshape(image, [768, 1024, 3])
+    label = tf.reshape(label, [768, 1024])
+
+
+    # reformat data if needed.
+    
+    # Creates batches by randomly shuffling tensors
+    images, labels = tf.train.shuffle_batch([image, label],
+                                            batch_size=2,
+                                            capacity=50,
+                                            num_threads=1,
+                                            min_after_dequeue=10)
+
+    # Initialize all global and local variables
+    init_op = tf.group(tf.global_variables_initializer(),
+                       tf.local_variables_initializer())
+    sess.run(init_op)
+
+    # Create a coordinator and run all QueueRunner objects
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+    for batch_index in range(5):
+        img, lbl = sess.run([images, labels])
+        img = img.astype(np.uint8)
+        plt.subplot(111)
+        plt.imshow(img[0, ...])
+        plt.title('image from tfrecord')
+        plt.show()
+
+    # Stop the threads
+    coord.request_stop()
+    
+    # Wait for threads to stop
+    coord.join(threads)
+    sess.close()
