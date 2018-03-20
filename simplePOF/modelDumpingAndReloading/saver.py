@@ -17,9 +17,9 @@ init_op = tf.global_variables_initializer()
 # n hours, and those are not accounted at all in the max_to_keep option
 saver = tf.train.Saver(max_to_keep=1, keep_checkpoint_every_n_hours=2)
 
-#One can also on add ops to save and restore only `v2` using the name "v2"
+#One can also add ops to save and restore only `v2` using the name "v2"
 saver2 = tf.train.Saver({"v2": v2})
-#Or one can save with the default anme but only a suibset of the variables
+#Or one can save with the default anme but only a subset of the variables
 saver3 = tf.train.Saver([v1,v2])
 
 # Later, launch the model, initialize the variables, do some work, and save the
