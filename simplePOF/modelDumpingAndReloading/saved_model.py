@@ -91,7 +91,7 @@ class Test():
                 self.saved_model_builder.add_meta_graph_and_variables(
                     sess, [tf.saved_model.tag_constants.SERVING],
                     signature_def_map=signature_def_map)
-                self.saved_model_builder.save()
+                self.saved_model_builder.save(as_text=True)
              
             # draw stuff to show that it works
             minx=np.min(np.concatenate((xtr,xte)))
