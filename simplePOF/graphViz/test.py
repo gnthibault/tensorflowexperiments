@@ -44,6 +44,10 @@ with tf.Session() as sess:
     trainWriter = tf.summary.FileWriter("OutputLogDirectory/train", graph=sess.graph)
     testWriter = tf.summary.FileWriter("OutputLogDirectory/test", graph=sess.graph)
 
+    #in all cases, add graph to summary
+    trainWriter.add_graph(sess.graph)
+    testWriter.add_graph(sess.graph)
+
     la0 = np.random.rand(5)
     la1 = np.random.rand(5)
   

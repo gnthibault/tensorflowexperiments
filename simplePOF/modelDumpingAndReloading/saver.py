@@ -32,7 +32,7 @@ with tf.Session() as sess:
       inc_v1.op.run()
       dec_v2.op.run()
 
-      # Save the variables to disk.
+      # Save the model + variables to disc. returns path
       save_path = saver.save(sess, "./ckpt/my_model", global_step=i)
       #The following files will be created:
       #my_model-0.index
