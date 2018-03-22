@@ -15,14 +15,17 @@ batch_shuffle = tf.train.shuffle_batch([data_input],
 #allow_smaller_final_batch: if True, a smaller batch value than batch_size
 #is returned when the queue is closed and there are not enough elements to fill
 #the batch
-
 #capacity: An integer. The maximum number of elements in the queue
-
 #min_after_dequeue: Minimum number elements in the queue after a dequeue, used to ensure a level of mixing of elements.
-
 #num_threads: The number of threads enqueuing tensor_list.
-
 #seed: Seed for the random shuffling within the queue.
+
+
+# the train shuffle batch generates its own ops for parallel computations:
+#This function adds the following to the current Graph:
+#A shuffling queue into which tensors from tensors are enqueued.
+#A dequeue_many operation to create batches from the queue.
+#A QueueRunner to QUEUE_RUNNER collection, to enqueue the tensors from tensors.
 
 batch_no_shuffle = tf.train.batch([data_input],
                                   enqueue_many=True,

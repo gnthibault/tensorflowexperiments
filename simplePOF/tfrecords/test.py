@@ -134,6 +134,13 @@ with tf.Session() as sess:
                                             num_threads=1,
                                             min_after_dequeue=10)
 
+    # the train shuffle batch generates its own ops for parallel computations:
+    #This function adds the following to the current Graph:
+    #A shuffling queue into which tensors from tensors are enqueued.
+    #A dequeue_many operation to create batches from the queue.
+    #A QueueRunner to QUEUE_RUNNER collection, to enqueue the tensors from
+    # tensors.
+
     # Initialize all global and local variables
     init_op = tf.group(tf.global_variables_initializer(),
                        tf.local_variables_initializer())
@@ -155,4 +162,3 @@ with tf.Session() as sess:
     
     # Wait for threads to stop
     coord.join(threads)
-    sess.close()

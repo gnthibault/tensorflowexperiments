@@ -21,6 +21,8 @@ class Test():
         self.model_ckpt_directory = './ckpt/'
         self.model_ckpt_path = './ckpt/my_model'
 
+
+    def initGraph(self):
         self.graph = tf.Graph()
         with self.graph.as_default() as graph:
             with tf.name_scope('inputs'):
@@ -151,10 +153,12 @@ class Test():
 
 if __name__ == '__main__':
     t = Test()
+    t.initGraph()
     x_train, y_train = Test.make_noisy_data()
     x_test, y_test = Test.make_noisy_data()
     t.initializeLinearRegressionTraining(x_train, y_train,x_test, y_test)
     del t
     t = Test()
+    t.initGraph()
     t.restartLinearRegression(x_train, y_train,x_test, y_test)
     t.showPlot()
