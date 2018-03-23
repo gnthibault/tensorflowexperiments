@@ -6,6 +6,7 @@ import sys
 # tensorflow stuff
 import tensorflow as tf
 from tensorflow.python.saved_model import simple_save
+from tensorflow.python.platform import gfile
 
 # Math stuff
 import numpy as np
@@ -20,7 +21,7 @@ class Test():
         # define a model builder to save inference model
         self.model_ckpt_directory = './ckpt/'
         self.model_ckpt_path = './ckpt/my_model'
-        self.meta_graph_filename = 'my_graph.meta'
+        self.graphFileName = 'my_graph.pb'
         self.graph = None
 
         # Tensor names decided in advance    
@@ -83,9 +84,8 @@ class Test():
                                              keep_checkpoint_every_n_hours=2)
 
             # Also store the graph definition
-            meta_graph_filepath = os.path.join(self.model_ckpt_directory,
-                                               self.meta_graph_filename)
-            tf.train.export_meta_graph(filename=meta_graph_filepath)
+            tf.train.write_graph(self.graph, logdir=self.model_ckpt_directory,
+                                 name=self.graphFileName, as_text=False)
 
     def launchTrainingLoop(self, nb_iter, xtr, ytr, xte, yte, sess):
         graph = tf.get_default_graph()
@@ -126,31 +126,47 @@ class Test():
         """ Assuming the model is y = a x + b
         """
         with tf.Session(graph=self.graph) as sess:
-            # Initialize variables
             init_op = tf.global_variables_initializer()
+            # Initialize variables
             sess.run(init_op)
             self.launchTrainingLoop(81, xtr, ytr, xte, yte, sess)
 
     def restartLinearRegression(self, xtr, ytr, xte, yte):
         ckpt_path = tf.train.latest_checkpoint(self.model_ckpt_directory)
-        meta_graph_filepath = os.path.join(self.model_ckpt_directory,
-                                           self.meta_graph_filename)
         print('Found latest ckpt file: {}'.format(ckpt_path))
 
-        # loading model from file, if graph is note initialized,
-        with tf.Session(graph=tf.Graph()) as sess:
-            # We don't default initialize variables, but restore them
-            self.ckpt_saver = tf.train.import_meta_graph(meta_graph_filepath)
-            self.ckpt_saver.restore(sess, ckpt_path)
-            print("Model restored.")
+        #other possibility, reload graph as well !!!
+        graphFilePath = os.path.join(self.model_ckpt_directory,
+                                     self.graphFileName)
+        with gfile.FastGFile(graphFilePath,'rb') as f:
+            print('Now parsing file {}'.format(graphFilePath))
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
 
-            self.launchTrainingLoop(121, xtr, ytr, xte, yte, sess)
+        with tf.Graph().as_default() as graph:
+            print('Before graph import {}'.format(
+                graph.get_all_collection_keys()))
+            tf.import_graph_def(graph_def)
+            print('After graph import {}'.format(
+                graph.get_all_collection_keys()))
 
-            # get final training results
-            a = sess.graph.get_tensor_by_name('train_model/'+self.a+':0')
-            aval = sess.run(a)
-            b = sess.graph.get_tensor_by_name('train_model/'+self.b+':0')
-            bval = sess.run(b)
+            with tf.Session(graph=graph) as sess:
+                #This will load the graphdef into the default graph of the Session
+                #tf.import_graph_def(graph_def)
+                #self.graph = sess.graph
+                print('After graph load in session {}'.format(
+                    sess.graph.get_all_collection_keys()))
+                # We don't default initialize variables, but restore them
+                tf.train.Saver().restore(sess, ckpt_path)
+                print("Model restored.")
+
+                self.launchTrainingLoop(121, xtr, ytr, xte, yte, sess)
+
+                # get final training results
+                a = sess.graph.get_tensor_by_name('train_model/'+self.a+':0')
+                aval = sess.run(a)
+                b = sess.graph.get_tensor_by_name('train_model/'+self.b+':0')
+                bval = sess.run(b)
 
         # draw stuff to show that it works
         minx=np.min(np.concatenate((xtr,xte)))
