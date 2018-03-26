@@ -4,8 +4,6 @@ import shutil
 
 # tensorflow stuff
 import tensorflow as tf
-from tensorflow.python.saved_model import simple_save
-from tensorflow.python.lib.io import file_io
 
 # Math stuff
 import numpy as np
@@ -63,7 +61,7 @@ class Test():
 
             # Set up the signature for Predict with input and output tensor
             # specification.
-            predict_signature_def = self._build_regression_signature(
+            predict_signature_def = Test._build_regression_signature(
                 self.x_placeholder, self.y_inference)
             signature_def_map = {'regress_x_to_y': predict_signature_def}
 
@@ -102,12 +100,12 @@ class Test():
             plt.plot(xtr, ytr, 'b.')
             plt.plot(xte, yte, 'g.')
 
-    def inferLinearRegression(self, x):
+    def inferLinearRegression(model_directory, x):
         # loading model from file
         with tf.Session(graph=tf.Graph()) as sess:
             tf.saved_model.loader.load(sess,
                                        [tf.saved_model.tag_constants.SERVING],
-                                       self.model_directory)
+                                       model_directory)
             graph = tf.get_default_graph()
             input_node = graph.get_tensor_by_name(
                 "inputs/x:0")
@@ -126,7 +124,7 @@ class Test():
         y = a * x + b + noise
         return np.float32(x), np.float32(y)
 
-    def _build_regression_signature(self, input_tensor, output_tensor):
+    def _build_regression_signature(input_tensor, output_tensor):
         """Helper function for building a regression SignatureDef.
            Possible signature_constants keys are:
                CLASSIFY_INPUTS
@@ -153,13 +151,20 @@ class Test():
             signature_inputs, signature_outputs,
             tf.saved_model.signature_constants.REGRESS_METHOD_NAME)
 
-    def showPlot(self):
+    def showPlot():
         plt.show()
 
 if __name__ == '__main__':
-    t = Test()
+    # make random data
     x_train, y_train = Test.make_noisy_data()
     x_test, y_test = Test.make_noisy_data()
+
+    # train linear regression
+    t = Test()
     t.trainLinearRegression(x_train, y_train,x_test, y_test)
-    t.inferLinearRegression(x_test)
-    t.showPlot()
+    model_directory = t.model_directory
+    del t
+
+    # make inference
+    Test.inferLinearRegression(model_directory, x_test)
+    Test.showPlot()

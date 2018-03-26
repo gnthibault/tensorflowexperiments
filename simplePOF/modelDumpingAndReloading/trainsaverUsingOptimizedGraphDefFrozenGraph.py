@@ -5,8 +5,9 @@ import sys
 
 # tensorflow stuff
 import tensorflow as tf
-from tensorflow.python.saved_model import simple_save
 from tensorflow.python.platform import gfile
+from tensorflow.python.tools import freeze_graph
+from tensorflow.python.tools import optimize_for_inference_lib
 
 # Math stuff
 import numpy as np
@@ -21,7 +22,10 @@ class Test():
         # define a model builder to save inference model
         self.model_ckpt_directory = './ckpt/'
         self.model_ckpt_path = './ckpt/my_model'
-        self.graphFileName = 'my_graph.pb'
+        self.use_binary_export = True
+        self.graph_base_file_name = 'my_graph.pb'
+        self.output_frozen_graph_base_name = 'frozen_'
+        self.output_optimized_graph_base_name = 'optimized_'
         self.graph = None
 
         # Tensor names decided in advance    
@@ -35,6 +39,25 @@ class Test():
         self.train = 'train'
         self.test_loss = 'test_loss'
 
+        # Tensor/op name dedicated to frozen model restoration
+        self.restore_op_name = "save/restore_all"
+        self.frozen_filename = "save/Const:0"
+
+    @property
+    def graph_file_name(self):
+        if self.use_binary_export:
+            return self.graph_base_file_name
+        else:        
+            return self.graph_base_file_name+'txt'
+
+    @property
+    def output_frozen_graph_name(self):
+        return self.output_frozen_graph_base_name+self.graph_file_name
+
+    @property
+    def output_optimized_graph_name(self):
+        return self.output_optimized_graph_base_name+self.graph_file_name
+
     def initGraph(self):
         self.graph = tf.Graph()
         with self.graph.as_default() as graph:
@@ -42,7 +65,9 @@ class Test():
                 x_placeholder = tf.placeholder(shape=[None],
                                                dtype=tf.float32,
                                                name=self.x_placeholder)
-                print('Here is the name of the tensor {}'.format(
+                x_placeholder = tf.identity(x_placeholder,
+                                            name='x')
+                print('Here is the name of the op {}'.format(
                     x_placeholder.name))
                 y_placeholder = tf.placeholder(shape=[None],
                                                dtype=tf.float32,
@@ -85,7 +110,8 @@ class Test():
 
             # Also store the graph definition
             tf.train.write_graph(self.graph, logdir=self.model_ckpt_directory,
-                                 name=self.graphFileName, as_text=False)
+                                 name=self.graph_file_name,
+                                 as_text=not self.use_binary_export)
 
     def launchTrainingLoop(self, nb_iter, xtr, ytr, xte, yte, sess):
         graph = tf.get_default_graph()
@@ -129,15 +155,52 @@ class Test():
             init_op = tf.global_variables_initializer()
             # Initialize variables
             sess.run(init_op)
-            self.launchTrainingLoop(81, xtr, ytr, xte, yte, sess)
+            self.launchTrainingLoop(101, xtr, ytr, xte, yte, sess)
 
-    def restartLinearRegression(self, xtr, ytr, xte, yte):
+    def exportFrozenGraphForInference(self):
+
+        # Freeze the graph
+        input_graph_path = os.path.join(self.model_ckpt_directory,
+                                        self.graph_file_name)
         ckpt_path = tf.train.latest_checkpoint(self.model_ckpt_directory)
-        print('Found latest ckpt file: {}'.format(ckpt_path))
+        input_saver_def_path = ""
+        output_node_name = "inference_model/"+self.y_inference
+        self.restore_op_name = "save/restore_all"
+        self.frozen_filename = "save/Const:0"
+        clear_devices = True
+
+        print('Freezing graph {}'.format(input_graph_path))
+        freeze_graph.freeze_graph(input_graph_path, input_saver_def_path,
+                                  self.use_binary_export, ckpt_path,
+                                  output_node_name, self.restore_op_name,
+                                  self.frozen_filename,
+                                  self.output_frozen_graph_name,
+                                  clear_devices, "")
+
+    def optimizeFrozenNetwork(self):
+        # Optimize for inference
+
+        # First: load graphdef from protobuf file
+        input_graph_def = tf.GraphDef()
+        read_mode = 'rb' if self.use_binary_export else 'r'
+        with tf.gfile.Open(self.output_frozen_graph_name, read_mode) as f:
+            data = f.read()
+        input_graph_def.ParseFromString(data)
+
+        output_graph_def = optimize_for_inference_lib.optimize_for_inference(
+            input_graph_def,
+            ['inputs/x'], # an array of the input node(s)
+            ["inference_model/"+self.y_inference], # an array of output nodes
+            tf.float32.as_datatype_enum)
+
+        # Save the optimized graph
+        with tf.gfile.FastGFile(self.output_optimized_graph_name, "w") as f:
+            f.write(output_graph_def.SerializeToString())
+
+
+    def inferFromFrozenGraph():
 
         #other possibility, reload graph as well !!!
-        graphFilePath = os.path.join(self.model_ckpt_directory,
-                                     self.graphFileName)
         with gfile.FastGFile(graphFilePath,'rb') as f:
             print('Now parsing file {}'.format(graphFilePath))
             graph_def = tf.GraphDef()
@@ -183,7 +246,7 @@ class Test():
         y = a * x + b + noise
         return np.float32(x), np.float32(y)
 
-    def showPlot(self):
+    def showPlot():
         plt.show()
 
 if __name__ == '__main__':
@@ -192,7 +255,10 @@ if __name__ == '__main__':
     x_train, y_train = Test.make_noisy_data()
     x_test, y_test = Test.make_noisy_data()
     t.initializeLinearRegressionTraining(x_train, y_train,x_test, y_test)
+    t.exportFrozenGraphForInference()
+    t.optimizeFrozenNetwork()
     del t
-    t = Test()
-    t.restartLinearRegression(x_train, y_train,x_test, y_test)
-    t.showPlot()
+    #OptimizeModelForInference()
+    #t = Test()
+    #t.inferFromFrozenGraph(x_test)
+    #t.showPlot()
