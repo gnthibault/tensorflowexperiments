@@ -243,6 +243,9 @@ class Test():
             #plot stuff
             plt.plot(x,y,'y.')
 
+            print('After graph import, there is no collection {}'.format(
+                sess.graph.get_all_collection_keys()))
+
     def make_noisy_data(a=0.1, b=0.3, n=100):
         x = np.random.rand(n).astype(np.float32)
         noise = np.random.normal(scale=0.01, size=len(x))
