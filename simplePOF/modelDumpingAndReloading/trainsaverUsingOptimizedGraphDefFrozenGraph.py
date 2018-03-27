@@ -22,10 +22,13 @@ class Test():
         # define a model builder to save inference model
         self.model_ckpt_directory = './ckpt/'
         self.model_ckpt_path = './ckpt/my_model'
-        self.use_binary_export = True
         self.graph_base_file_name = 'my_graph.pb'
         self.output_frozen_graph_base_name = 'frozen_'
         self.output_optimized_graph_base_name = 'optimized_'
+        self.viz_dir = 'tensorboard'
+        self.use_binary_export = True
+
+        # main graph (may not always be populated)
         self.graph = None
 
         # Tensor names decided in advance    
@@ -52,11 +55,13 @@ class Test():
 
     @property
     def output_frozen_graph_name(self):
-        return self.output_frozen_graph_base_name+self.graph_file_name
+        return os.path.join(self.model_ckpt_directory,
+            self.output_frozen_graph_base_name+self.graph_file_name)
 
     @property
     def output_optimized_graph_name(self):
-        return self.output_optimized_graph_base_name+self.graph_file_name
+        return os.path.join(self.model_ckpt_directory,
+            self.output_optimized_graph_base_name+self.graph_file_name)
 
     def initGraph(self):
         self.graph = tf.Graph()
@@ -65,6 +70,9 @@ class Test():
                 x_placeholder = tf.placeholder(shape=[None],
                                                dtype=tf.float32,
                                                name=self.x_placeholder)
+                # I had to create an op for the input, otherwise the
+                # graph optimizing engine doesn't want to treat an input
+                # that is a tensor
                 x_placeholder = tf.identity(x_placeholder,
                                             name='x')
                 print('Here is the name of the op {}'.format(
@@ -112,7 +120,6 @@ class Test():
             tf.train.write_graph(self.graph, logdir=self.model_ckpt_directory,
                                  name=self.graph_file_name,
                                  as_text=not self.use_binary_export)
-
     def launchTrainingLoop(self, nb_iter, xtr, ytr, xte, yte, sess):
         graph = tf.get_default_graph()
 
@@ -138,6 +145,12 @@ class Test():
 
         for step in range(nb_iter):
             sess.run([train], feed_dict=tr_feed_dict)
+
+            # We store the graph so we can view it with tboard
+            trainWriter = tf.summary.FileWriter(
+                os.path.join(self.model_ckpt_directory, self.viz_dir),
+                graph=sess.graph)
+
             if step % 20 == 0:
                 test_loss_val = sess.run([test_loss],
                                          feed_dict=te_feed_dict)
@@ -147,6 +160,7 @@ class Test():
                 saveCkpt(step)
         #Here we are supposed to save the last ckpt
         saveCkpt(nb_iter-1)
+        trainWriter.close()
 
     def initializeLinearRegressionTraining(self, xtr, ytr, xte, yte):
         """ Assuming the model is y = a x + b
@@ -156,8 +170,21 @@ class Test():
             # Initialize variables
             sess.run(init_op)
             self.launchTrainingLoop(101, xtr, ytr, xte, yte, sess)
+            # get final training results
+            a = sess.graph.get_tensor_by_name('train_model/'+self.a+':0')
+            aval = sess.run(a)
+            b = sess.graph.get_tensor_by_name('train_model/'+self.b+':0')
+            bval = sess.run(b)
+        # draw stuff to show that it works
+        minx=np.min(np.concatenate((xtr,xte)))
+        maxx=np.max(np.concatenate((xtr,xte)))
+        xref=np.linspace(minx,maxx,100)
+        plt.figure(0)
+        plt.plot(xref, aval*xref+bval, 'r.')
+        plt.plot(xtr, ytr, 'b.')
+        plt.plot(xte, yte, 'g.')
 
-    def exportFrozenGraphForInference(self):
+    def exportFrozenGraphForInference(self, clear_devices=True):
 
         # Freeze the graph
         input_graph_path = os.path.join(self.model_ckpt_directory,
@@ -165,9 +192,6 @@ class Test():
         ckpt_path = tf.train.latest_checkpoint(self.model_ckpt_directory)
         input_saver_def_path = ""
         output_node_name = "inference_model/"+self.y_inference
-        self.restore_op_name = "save/restore_all"
-        self.frozen_filename = "save/Const:0"
-        clear_devices = True
 
         print('Freezing graph {}'.format(input_graph_path))
         freeze_graph.freeze_graph(input_graph_path, input_saver_def_path,
@@ -182,63 +206,42 @@ class Test():
 
         # First: load graphdef from protobuf file
         input_graph_def = tf.GraphDef()
-        read_mode = 'rb' if self.use_binary_export else 'r'
-        with tf.gfile.Open(self.output_frozen_graph_name, read_mode) as f:
+        with tf.gfile.Open(self.output_frozen_graph_name, 'rb') as f:
             data = f.read()
         input_graph_def.ParseFromString(data)
 
         output_graph_def = optimize_for_inference_lib.optimize_for_inference(
             input_graph_def,
-            ['inputs/x'], # an array of the input node(s)
-            ["inference_model/"+self.y_inference], # an array of output nodes
+            # array of input node(s), has to be op, no tensor
+            ['inputs/x'], 
+            # an array of output nodes
+            ["inference_model/"+self.y_inference], 
             tf.float32.as_datatype_enum)
 
         # Save the optimized graph
         with tf.gfile.FastGFile(self.output_optimized_graph_name, "w") as f:
             f.write(output_graph_def.SerializeToString())
 
+    def inferFromFrozenGraph(self, x):
+        # First: load graphdef from protobuf file
+        graph_def = tf.GraphDef()
+        with tf.gfile.Open(self.output_optimized_graph_name, 'rb') as f:
+            data = f.read()
+        graph_def.ParseFromString(data)
 
-    def inferFromFrozenGraph():
-
-        #other possibility, reload graph as well !!!
-        with gfile.FastGFile(graphFilePath,'rb') as f:
-            print('Now parsing file {}'.format(graphFilePath))
-            graph_def = tf.GraphDef()
-            graph_def.ParseFromString(f.read())
-
-        with tf.Graph().as_default() as graph:
-            print('Before graph import {}'.format(
-                graph.get_all_collection_keys()))
+        # loading model from file
+        with tf.Session(graph=tf.Graph()) as sess:
             tf.import_graph_def(graph_def)
-            print('After graph import {}'.format(
-                graph.get_all_collection_keys()))
+            input_node = sess.graph.get_tensor_by_name(
+                'import/inputs/x'+':0')
+            output_node = sess.graph.get_tensor_by_name(
+                'import/inference_model/'+self.y_inference+':0')
 
-            with tf.Session(graph=graph) as sess:
-                #This will load the graphdef into the default graph of the Session
-                #tf.import_graph_def(graph_def)
-                #self.graph = sess.graph
-                print('After graph load in session {}'.format(
-                    sess.graph.get_all_collection_keys()))
-                # We don't default initialize variables, but restore them
-                tf.train.Saver().restore(sess, ckpt_path)
-                print("Model restored.")
+            # run inference
+            y = sess.run(output_node, feed_dict={input_node: x})
 
-                self.launchTrainingLoop(121, xtr, ytr, xte, yte, sess)
-
-                # get final training results
-                a = sess.graph.get_tensor_by_name('train_model/'+self.a+':0')
-                aval = sess.run(a)
-                b = sess.graph.get_tensor_by_name('train_model/'+self.b+':0')
-                bval = sess.run(b)
-
-        # draw stuff to show that it works
-        minx=np.min(np.concatenate((xtr,xte)))
-        maxx=np.max(np.concatenate((xtr,xte)))
-        xref=np.linspace(minx,maxx,100)
-        plt.figure(0)
-        plt.plot(xref, aval*xref+bval, 'r.')
-        plt.plot(xtr, ytr, 'b.')
-        plt.plot(xte, yte, 'g.')
+            #plot stuff
+            plt.plot(x,y,'y.')
 
     def make_noisy_data(a=0.1, b=0.3, n=100):
         x = np.random.rand(n).astype(np.float32)
@@ -258,7 +261,6 @@ if __name__ == '__main__':
     t.exportFrozenGraphForInference()
     t.optimizeFrozenNetwork()
     del t
-    #OptimizeModelForInference()
-    #t = Test()
-    #t.inferFromFrozenGraph(x_test)
-    #t.showPlot()
+    t = Test()
+    t.inferFromFrozenGraph(x_test)
+    Test.showPlot()
