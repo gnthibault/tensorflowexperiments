@@ -5,7 +5,6 @@ import sys
 
 # tensorflow stuff
 import tensorflow as tf
-from tensorflow.python.saved_model import simple_save
 
 # Math stuff
 import numpy as np

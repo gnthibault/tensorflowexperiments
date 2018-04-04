@@ -1,14 +1,16 @@
 import tensorflow as tf
 import numpy as np
 
-data = np.arange(1, 100 + 1)
+data = np.arange(1, 9 + 1)
 data_input = tf.constant(data)
+batch_size = 10
+nb_iter = 11
 
 batch_shuffle = tf.train.shuffle_batch([data_input],
                                        enqueue_many=True, 
-                                       batch_size=10,
+                                       batch_size=batch_size,
                                        capacity=100,
-                                       min_after_dequeue=10,
+                                       min_after_dequeue=4*batch_size,
                                        num_threads=4,
                                        seed=401,
                                        allow_smaller_final_batch=True)
@@ -29,14 +31,14 @@ batch_shuffle = tf.train.shuffle_batch([data_input],
 
 batch_no_shuffle = tf.train.batch([data_input],
                                   enqueue_many=True,
-                                  batch_size=10,
+                                  batch_size=batch_size,
                                   capacity=100,
                                   allow_smaller_final_batch=True)
 
 with tf.Session() as sess:
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord)
-    for i in range(10):
+    for i in range(nb_iter):
         print(i, sess.run([batch_shuffle, batch_no_shuffle]))
     coord.request_stop()
     coord.join(threads)
