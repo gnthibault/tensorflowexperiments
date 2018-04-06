@@ -102,7 +102,7 @@ with tf.Session() as sess:
     feature = {'train/image': tf.FixedLenFeature([], tf.string),
                'train/label': tf.FixedLenFeature([], tf.string),
                'train/objects_number':tf.FixedLenFeature([], tf.int64),
-               'train/bboxes': tf.VarLenFeature(tf.float32),
+               'train/bboxes': tf.VarLenFeature(tf.int64),
                'train/bb_labels': tf.VarLenFeature(tf.int64),
                'train/width': tf.FixedLenFeature([], tf.int64),
                'train/height': tf.FixedLenFeature([], tf.int64),
@@ -150,16 +150,16 @@ with tf.Session() as sess:
     # Image content informations
 
     # BBOX data is actually dense convert it to dense tensor
-    nb_obj = tf.cast(features['train/objects_number'], tf.int64)
+    nb_obj = tf.cast(features['train/objects_number'], tf.int32)
     bboxes_shape = tf.parallel_stack([nb_obj, 4])
     bboxes = tf.sparse_tensor_to_dense(features['train/bboxes'], default_value=0)
     bboxes = tf.reshape(bboxes, bboxes_shape)
-    bboxes_labels = tf.cast(features['train/bb_labels'], tf.int64)
+    bboxes_labels = tf.sparse_tensor_to_dense(features['train/bb_labels'])
 
     # get info about images
-    width = tf.cast(features['train/width'], tf.int32)
-    height = tf.cast(features['train/height'], tf.int32)
-    channels = tf.cast(features['train/channels'], tf.int32)
+    width = tf.cast(features['train/width'], tf.int64)
+    height = tf.cast(features['train/height'], tf.int64)
+    channels = tf.cast(features['train/channels'], tf.int64)
 
     # get some more info if needed
     comment = tf.cast(features['train/info/comment'], tf.string)
@@ -177,7 +177,6 @@ with tf.Session() as sess:
     # see https://github.com/tensorflow/tensorflow/issues/2604
     image = tf.reshape(image, [768, 1024, 3])
     label = tf.reshape(label, [768, 1024])
-
 
     # reformat data if needed.
     
@@ -200,6 +199,8 @@ with tf.Session() as sess:
     # tensors.
 
     # Initialize all global and local variables
+    obj_idx = tf.get_variable('obj_idx', shape=(), trainable=False,
+                        initializer=tf.zeros_initializer(), dtype=tf.int32)
     init_op = tf.group(tf.global_variables_initializer(),
                        tf.local_variables_initializer())
     sess.run(init_op)
@@ -210,6 +211,7 @@ with tf.Session() as sess:
     for batch_index in range(nb_iter):
         img, lbl, h, w, chan, com, qual = sess.run(shuffled_batch)
         print('starting a new batch')
+        tf.assign(obj_idx,0)
         for i in range(batch_size):
             img = img.astype(np.uint8)
             #plt.subplot(111)
@@ -217,7 +219,20 @@ with tf.Session() as sess:
             #plt.title('image from tfrecord')
             #plt.show()
             print('Comment was: {} and quality was {}'.format(
-                com[i].decode(), qual[i]))
+                  com[i].decode(), qual[i]))
+            # Now perform a sample dependant loop
+            loop_condition = lambda obj_idx: tf.less(obj_idx, nb_obj)
+            def loop_body(obj_idx):
+                # do something useful here
+                print('object bbox is {}, label is : {}'.format(
+                      bboxes[obj_idx].eval(),
+                      bboxes_labels[obj_idx].eval()))
+                # increment i
+                return [tf.add(obj_idx, 1)]
+
+            # do the loop:
+            obj_idx = tf.while_loop(loop_condition, loop_body, [obj_idx])
+            sess.run(r)
 
     # Stop the threads
     coord.request_stop()
