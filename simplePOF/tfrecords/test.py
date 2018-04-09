@@ -152,7 +152,7 @@ with tf.Session() as sess:
     # BBOX data is actually dense convert it to dense tensor
     nb_obj = tf.cast(features['train/objects_number'], tf.int32)
     bboxes_shape = tf.parallel_stack([nb_obj, 4])
-    bboxes = tf.sparse_tensor_to_dense(features['train/bboxes'], default_value=0)
+    bboxes = tf.sparse_tensor_to_dense(features['train/bboxes'])
     bboxes = tf.reshape(bboxes, bboxes_shape)
     bboxes_labels = tf.sparse_tensor_to_dense(features['train/bb_labels'])
 
@@ -182,7 +182,10 @@ with tf.Session() as sess:
     
     # Creates batches by randomly shuffling tensors
     batch_size = 2
-    example = [image, label, height, width, channels, comment, quality]
+    #example = [image, label, height, width, channels, nb_obj, bboxes, 
+    #           bboxes_labels, comment, quality]
+    # fails with ValueError: All shapes must be fully defined
+    example = [image, label, height, width, channels, nb_obj, comment, quality]
     shuffled_batch = tf.train.shuffle_batch(example,
                                             batch_size=batch_size,
                                             capacity=nb_iter*batch_size,
@@ -200,7 +203,7 @@ with tf.Session() as sess:
 
     # Initialize all global and local variables
     obj_idx = tf.get_variable('obj_idx', shape=(), trainable=False,
-                        initializer=tf.zeros_initializer(), dtype=tf.int32)
+        initializer=tf.zeros_initializer(), dtype=tf.int32)
     init_op = tf.group(tf.global_variables_initializer(),
                        tf.local_variables_initializer())
     sess.run(init_op)
@@ -209,9 +212,9 @@ with tf.Session() as sess:
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord)
     for batch_index in range(nb_iter):
-        img, lbl, h, w, chan, com, qual = sess.run(shuffled_batch)
+        img, lbl, h, w, chan, nobj, com, qual = sess.run(
+            shuffled_batch)
         print('starting a new batch')
-        tf.assign(obj_idx,0)
         for i in range(batch_size):
             img = img.astype(np.uint8)
             #plt.subplot(111)
@@ -220,19 +223,21 @@ with tf.Session() as sess:
             #plt.show()
             print('Comment was: {} and quality was {}'.format(
                   com[i].decode(), qual[i]))
-            # Now perform a sample dependant loop
-            loop_condition = lambda obj_idx: tf.less(obj_idx, nb_obj)
-            def loop_body(obj_idx):
+            tnobj = tf.constant(value=2)#nobj
+            # Now define a while loop based subgraph
+            #tf.assign(obj_idx, obj_idx.initial_value)
+            # this is not needed apparently!
+            loop_condition = lambda idx: tf.less(idx, tnobj)
+            def loop_body(idx):
                 # do something useful here
-                print('object bbox is {}, label is : {}'.format(
-                      bboxes[obj_idx].eval(),
-                      bboxes_labels[obj_idx].eval()))
+                idx = tf.Print(idx, [idx, bboxes[idx], bboxes_labels[idx]],
+                                   'object idx - bbox - label is : ')
                 # increment i
-                return [tf.add(obj_idx, 1)]
+                return [tf.add(idx, 1)]
 
             # do the loop:
             obj_idx = tf.while_loop(loop_condition, loop_body, [obj_idx])
-            sess.run(r)
+            sess.run(obj_idx)
 
     # Stop the threads
     coord.request_stop()
